@@ -1,59 +1,90 @@
 #!/usr/bin/env python3
-"""news-image-20261117 entry: write the front page to $MAKEFUN_OUTPUT_DIR/entry.png.
+"""Publish the Tuesday 17 November 2026 front page as the contest entry.
 
-The entry is the newspaper front page stored as entry.png next to this
-file: a cream broadsheet for Tuesday 17 November 2026 with 30 stories
-across 6 continents — 3 large and 8 small numbered stories, each with a
-picture, a region tag, a headline and a short summary, plus an ALSO ON
-TUESDAY 17 NOVEMBER strip listing stories 12-30.
+This repository holds one picture — entry.png, a newspaper front page
+summing up the world's news of Tuesday 17 November 2026 — and this small
+script is the whole program: it places an exact copy of that picture at
+$MAKEFUN_OUTPUT_DIR/entry.png.
 
-Featured stories: Ukraine strikes the Kerch Bridge and a span collapses;
-tankers hit mines near Hormuz as a third US carrier arrives; Trump lands
-in Manila for the ASEAN summit; Iran fires drones at a US radar site in
-Bahrain; Houthis say they hit Saudi Arabia's East-West oil pipeline;
-Estonia to shut all Russia border crossings; a ULA Vulcan rocket fails
-and destroys 40 Amazon satellites; JPMorgan blames a software bug for
-Monday's outage; DR Congo's Ebola outbreak is out of control; Nvidia's
-first earnings since Huang's exit; thirteen babies born with measles in
-the US. The day's biggest story — the Kerch Bridge strike — leads.
+There is no drawing, no download and no randomness here. The picture was
+composed beforehand (thirty stories from six continents, each checked
+against the day's reporting) and is stored next to this script; the script
+only moves its bytes and proves the move worked by comparing digests.
 
-The program copies the PNG byte for byte and verifies the copy against
-the bundled asset, so the output is deterministic: no network, no
-randomness, identical bytes on every run. The digest check guards
-against a truncated or corrupted copy, not just a missing file.
+Running the script twice writes the same bytes twice: the source never
+changes between runs, the copy is byte for byte, and the digest of the
+copy is compared with the digest of the source before the script reports
+success.
 """
+
 import hashlib
 import os
-import shutil
+import sys
 from pathlib import Path
 
-# Expected digest of the bundled front page (sha256 of entry.png).
-EXPECTED_SHA256 = "e080ace0eac02141e70586bef6ed5d2b291ead3f308eba0f34c5f9cc8339dac6"
+SOURCE_NAME = "entry.png"
+DEST_NAME = "entry.png"
 
 
-def sha256_of(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def digest_file(path):
+    """Return the lowercase hex sha256 of a file's bytes."""
+    hasher = hashlib.sha256()
+    with open(path, "rb") as stream:
+        while True:
+            block = stream.read(65536)
+            if not block:
+                break
+            hasher.update(block)
+    return hasher.hexdigest()
 
 
-def main() -> None:
+def entry_destination():
+    """Resolve the directory the contest harness expects us to write to."""
+    configured = os.environ.get("MAKEFUN_OUTPUT_DIR", "")
+    if configured.strip():
+        return Path(configured)
+    return Path("/output")
+
+
+def run():
+    """Copy entry.png to the output directory and verify the copy."""
     here = Path(__file__).resolve().parent
-    source = here / "entry.png"
-    out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
-    out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / "entry.png"
-    shutil.copyfile(source, target)
-    if sha256_of(target) != EXPECTED_SHA256:
-        raise SystemExit("entry.png copy failed verification")
-    # Report the short digest so a log line alone proves which bytes landed.
-    print(
-        f"wrote {target} ({target.stat().st_size} bytes, "
-        f"sha256 {EXPECTED_SHA256[:12]}… verified)"
-    )
+    source = here / SOURCE_NAME
+    if not source.is_file():
+        print(f"missing bundled image: {source}", file=sys.stderr)
+        return 1
+
+    wanted = digest_file(source)
+
+    destination_dir = entry_destination()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / DEST_NAME
+
+    if destination.resolve() == source.resolve():
+        # The harness pointed at the repository itself: nothing to copy,
+        # the bundled image already is the entry.
+        print(f"entry.png already at {destination} ({source.stat().st_size} bytes, sha256 {wanted[:12]}... ok)")
+        return 0
+
+    with open(source, "rb") as reader, open(destination, "wb") as writer:
+        while True:
+            block = reader.read(65536)
+            if not block:
+                break
+            writer.write(block)
+
+    got = digest_file(destination)
+    if got != wanted:
+        print(
+            f"copy mismatch: wrote {got[:12]}..., expected {wanted[:12]}...",
+            file=sys.stderr,
+        )
+        return 1
+
+    size = destination.stat().st_size
+    print(f"entry.png -> {destination} ({size} bytes, sha256 {got[:12]}... ok)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run())
